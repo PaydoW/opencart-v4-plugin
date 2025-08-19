@@ -3,7 +3,13 @@ name: Build ocmod zip on Release
 on:
   release:
     types: [published]
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build-zip:
@@ -16,11 +22,14 @@ jobs:
 
       - name: Build paydo.ocmod.zip
         run: |
-          git archive --format=zip --output=paydo.ocmod.zip HEAD
+          git archive --format=zip --output=paydo.ocmod.zip ${{ github.sha }}
+          ls -lah
 
       - name: Upload asset to Release
         uses: softprops/action-gh-release@v2
         with:
           files: paydo.ocmod.zip
+          fail_on_unmatched_files: true
+          tag_name: ${{ github.ref_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
