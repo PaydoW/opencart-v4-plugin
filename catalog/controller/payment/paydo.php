@@ -51,14 +51,6 @@ class Paydo extends \Opencart\System\Engine\Controller {
 			$request = $this->preparePaymentRequest($order_info, $paydo_order_items);
 			$request['signature'] = $this->generate_signature($request['order']);
 
-			// статус "ожидания"
-			if ($this->config->get('payment_paydo_order_status_wait')) {
-				$this->model_checkout_order->addHistory(
-					$order_id,
-					(int)$this->config->get('payment_paydo_order_status_wait')
-				);
-			}
-
 			$invoiceId = $this->makeRequest($request);
 
 			if ($invoiceId) {

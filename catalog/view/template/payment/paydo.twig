@@ -17,7 +17,7 @@ async function paydo() {
       headers: { 'Accept': 'application/json' }
     });
 
-    const data = await response.json(); // теперь и при 4xx/5xx мы попытаемся прочитать тело
+    const data = await response.json();
 
     if (data && data.redirect) {
       window.location.href = data.redirect;
