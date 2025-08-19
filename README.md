@@ -62,7 +62,7 @@ Go to **Extensions → Modifications** and click **Refresh** to apply changes.
 ## Support
 
 * [Open an issue](https://github.com/PaydoW/opencart-v4-plugin/issues) if you are having issues with this plugin.
-* [PayDo Documentation](https://paydo.com/contacts-page-customer-support/)
+* [PayDo Documentation](https://github.com/PaydoW/paydo-api-doc)
 * [Contact PayDo support](https://paydo.com/contacts-page-customer-support/)
   
 **TIP**: When contacting support it will help us if you provide:
