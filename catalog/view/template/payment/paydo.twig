@@ -1,0 +1,36 @@
+<div class="buttons">
+    <div class="pull-right">
+        <button type="button" class="btn btn-primary" id="button_pay" onclick="paydo()">
+            {{ button_pay }}
+        </button>
+    </div>
+</div>
+
+<script>
+async function paydo() {
+  const button = document.getElementById('button_pay');
+  button.disabled = true;
+
+  try {
+    const response = await fetch('{{ paydo_url }}', {
+      method: 'POST',
+      headers: { 'Accept': 'application/json' }
+    });
+
+    const data = await response.json(); // теперь и при 4xx/5xx мы попытаемся прочитать тело
+
+    if (data && data.redirect) {
+      window.location.href = data.redirect;
+      return;
+    }
+
+    throw new Error(data && data.error ? data.error : 'Unknown error');
+  } catch (err) {
+    console.error('Paydo error:', err);
+    alert('Error occurred while processing payment.');
+  } finally {
+    button.disabled = false;
+  }
+}
+</script>
+
