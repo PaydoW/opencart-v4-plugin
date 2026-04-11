@@ -50,4 +50,34 @@ class Paydo extends \Opencart\System\Engine\Model {
 
 		return $method_data;
 	}
+
+	public function saveInvoice(int $order_id, string $invoice_id): void {
+		$this->ensureInvoiceTable();
+
+		$this->db->query(
+			"REPLACE INTO `" . DB_PREFIX . "paydo_invoice` SET `order_id` = '" . (int)$order_id . "', `invoice_id` = '" . $this->db->escape($invoice_id) . "', `date_added` = NOW()"
+		);
+	}
+
+	public function getInvoiceByOrderId(int $order_id): array {
+		$this->ensureInvoiceTable();
+
+		$query = $this->db->query(
+			"SELECT * FROM `" . DB_PREFIX . "paydo_invoice` WHERE `order_id` = '" . (int)$order_id . "' LIMIT 1"
+		);
+
+		return $query->row;
+	}
+
+	private function ensureInvoiceTable(): void {
+		$this->db->query(
+			"CREATE TABLE IF NOT EXISTS `" . DB_PREFIX . "paydo_invoice` (
+				`order_id` INT(11) NOT NULL,
+				`invoice_id` VARCHAR(64) NOT NULL,
+				`date_added` DATETIME NOT NULL,
+				PRIMARY KEY (`order_id`),
+				UNIQUE KEY `invoice_id` (`invoice_id`)
+			) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+		);
+	}
 }
