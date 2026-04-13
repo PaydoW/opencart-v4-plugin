@@ -25,6 +25,7 @@ class Paydo extends \Opencart\System\Engine\Controller {
 
 		try {
 			$this->load->model('checkout/order');
+			$this->load->model('extension/paydo/payment/paydo');
 
 			if (empty($this->session->data['order_id'])) {
 				$this->response->setOutput(json_encode(['error' => 'Missing order_id']));
@@ -54,7 +55,9 @@ class Paydo extends \Opencart\System\Engine\Controller {
 			$invoiceId = $this->makeRequest($request);
 
 			if ($invoiceId) {
-				$redirectUrl = "https://checkout.paydo.com/{$this->language->get('code')}/payment/invoice-preprocessing/{$invoiceId}";
+				$this->model_extension_paydo_payment_paydo->saveInvoice($order_id, $invoiceId);
+				$this->setPendingOrderStatus($order_info, $invoiceId);
+				$redirectUrl = 'https://checkout.paydo.com/' . rawurlencode($this->language->get('code')) . '/payment/invoice-preprocessing/' . rawurlencode($invoiceId);
 				$this->response->setOutput(json_encode(['redirect' => $redirectUrl]));
 			} else {
 				$this->log->write('Paydo: invoice creation failed or empty identifier');
@@ -76,12 +79,14 @@ class Paydo extends \Opencart\System\Engine\Controller {
 		}
 
 		$callback = json_decode(file_get_contents('php://input'), true);
-		$this->log->write('Callback: ' . print_r($callback, true));
+
 		if ($callback && isset($callback['invoice'])) {
-			if ($this->callback_check($callback) === 'valid') {
+			$callback_check = $this->callback_check($callback);
+
+			if ($callback_check === 'valid') {
 				$this->processCallback($callback);
 			} else {
-				$this->log->write('Error callback: ' . $this->callback_check($callback));
+				$this->log->write('Error callback: ' . $callback_check);
 			}
 		} else {
 			$this->log->write('Error. Callback is not an object or missing invoice.');
@@ -124,10 +129,13 @@ class Paydo extends \Opencart\System\Engine\Controller {
 	 */
 	private function processCallback($callback) {
 		$this->load->model('checkout/order');
-		if ($callback['transaction']['state'] === 2) {
-			$this->model_checkout_order->addHistory($callback['transaction']['order']['id'], $this->config->get('payment_paydo_order_status_success'));
-		} elseif (in_array($callback['transaction']['state'], [3, 5])) {
-			$this->model_checkout_order->addHistory($callback['transaction']['order']['id'], $this->config->get('payment_paydo_order_status_error'));
+		$order_id = (int)$callback['transaction']['order']['id'];
+		$state = (int)$callback['transaction']['state'];
+
+		if ($state === 2) {
+			$this->model_checkout_order->addHistory($order_id, $this->config->get('payment_paydo_order_status_success'));
+		} elseif (in_array($state, [3, 5], true)) {
+			$this->model_checkout_order->addHistory($order_id, $this->config->get('payment_paydo_order_status_error'));
 		}
 	}
 
@@ -146,8 +154,137 @@ class Paydo extends \Opencart\System\Engine\Controller {
 		if (!$txid) return 'Empty transaction id';
 		if (!$orderId) return 'Empty order id';
 		if (!(1 <= $state && $state <= 5)) return 'State is not valid';
-		
+
+		$this->load->model('checkout/order');
+		$this->load->model('extension/paydo/payment/paydo');
+
+		$order_info = $this->model_checkout_order->getOrder((int)$orderId);
+
+		if (!$order_info) {
+			return 'Order not found';
+		}
+
+		if (!$this->isPaydoOrder($order_info)) {
+			$this->log->write(
+				'Paydo callback order ownership mismatch. payment_code=' . $this->stringifyLogValue($order_info['payment_code'] ?? '') .
+				'; payment_method=' . $this->stringifyLogValue($order_info['payment_method'] ?? '')
+			);
+
+			return 'Order does not belong to Paydo payment method';
+		}
+
+		$stored_invoice = $this->model_extension_paydo_payment_paydo->getInvoiceByOrderId((int)$orderId);
+
+		if (!$stored_invoice) {
+			return 'Stored Paydo invoice not found for order';
+		}
+
+		if (!hash_equals((string)$stored_invoice['invoice_id'], (string)$invoiceId)) {
+			return 'Invoice identifier does not match stored value';
+		}
+
+		$remote_invoice = $this->getInvoice($invoiceId);
+
+		if (!$remote_invoice) {
+			return 'Unable to verify invoice with Paydo';
+		}
+
+		if ((string)($remote_invoice['identifier'] ?? '') !== (string)$invoiceId) {
+			return 'Verified invoice identifier mismatch';
+		}
+
+		if ((string)($remote_invoice['orderIdentifier'] ?? '') !== (string)$orderId) {
+			return 'Verified invoice order mismatch';
+		}
+
+		if (
+			isset($remote_invoice['amount']) &&
+			number_format((float)$remote_invoice['amount'], 2, '.', '') !== number_format((float)$order_info['total'], 2, '.', '')
+		) {
+			return 'Verified invoice amount mismatch';
+		}
+
+		if (
+			isset($remote_invoice['currency']) &&
+			strtoupper((string)$remote_invoice['currency']) !== strtoupper((string)$order_info['currency_code'])
+		) {
+			return 'Verified invoice currency mismatch';
+		}
+
+		if ((int)$state === 2 && (int)($remote_invoice['status'] ?? -1) !== 1) {
+			return 'Invoice is not marked as paid by Paydo';
+		}
+
 		return 'valid';
+	}
+
+	private function setPendingOrderStatus(array $order_info, string $invoice_id): void {
+		$this->load->model('checkout/order');
+
+		$current_status_id = (int)($order_info['order_status_id'] ?? 0);
+		$pending_status_id = (int)$this->config->get('payment_paydo_order_status_wait');
+
+		if ($pending_status_id <= 0 || $current_status_id > 0) {
+			return;
+		}
+
+		$comment = 'Paydo invoice created: ' . $invoice_id;
+
+		$this->model_checkout_order->addHistory(
+			(int)$order_info['order_id'],
+			$pending_status_id,
+			$comment
+		);
+	}
+
+	private function isPaydoOrder(array $order_info): bool {
+		foreach ($this->extractPaymentMethodCandidates($order_info) as $candidate) {
+			if (strpos($candidate, 'paydo') !== false) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private function extractPaymentMethodCandidates(array $order_info): array {
+		$candidates = [];
+		$payment_code = $order_info['payment_code'] ?? '';
+		$payment_method = $order_info['payment_method'] ?? '';
+
+		if (is_scalar($payment_code)) {
+			$candidates[] = strtolower(trim((string)$payment_code));
+		}
+
+		if (is_scalar($payment_method)) {
+			$candidates[] = strtolower(trim((string)$payment_method));
+		} elseif (is_array($payment_method)) {
+			foreach (['code', 'name', 'title'] as $key) {
+				if (isset($payment_method[$key]) && is_scalar($payment_method[$key])) {
+					$candidates[] = strtolower(trim((string)$payment_method[$key]));
+				}
+			}
+		}
+
+		return array_values(array_filter(array_unique($candidates)));
+	}
+
+	private function stringifyLogValue($value): string {
+		if (is_array($value)) {
+			$json = json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+			return $json !== false ? $json : '[array]';
+		}
+
+		if (is_bool($value)) {
+			return $value ? 'true' : 'false';
+		}
+
+		if ($value === null) {
+			return 'null';
+		}
+
+		return (string)$value;
 	}
 
 	/**
@@ -179,7 +316,8 @@ class Paydo extends \Opencart\System\Engine\Controller {
 		if (!$this->curl) {
 			$this->curl = curl_init();
 			curl_setopt($this->curl, CURLOPT_URL, 'https://api.paydo.com/v1/invoices/create');
-			curl_setopt($this->curl, CURLOPT_SSL_VERIFYPEER, false);
+			curl_setopt($this->curl, CURLOPT_SSL_VERIFYPEER, true);
+			curl_setopt($this->curl, CURLOPT_SSL_VERIFYHOST, 2);
 			curl_setopt($this->curl, CURLOPT_RETURNTRANSFER, true);
 			curl_setopt($this->curl, CURLOPT_HEADER, false);
 		}
@@ -201,10 +339,15 @@ class Paydo extends \Opencart\System\Engine\Controller {
 		curl_close($this->curl);
 		$this->curl = null;
 
+		if ($code < 200 || $code >= 300) {
+			$this->log->write('Paydo invoice creation HTTP error: ' . $code . '; body: ' . $response);
+			return '';
+		}
+
 		$json = json_decode($response, true);
 
 		if (is_array($json) && isset($json['data']) && is_string($json['data']) && $json['data'] !== '') {
-			return $json['data'];
+			return $this->validateInvoiceId($json['data']);
 		}
 
 		$id = $json['data']['invoice']['identifier']
@@ -213,9 +356,57 @@ class Paydo extends \Opencart\System\Engine\Controller {
 			?? '';
 
 		if ($id !== '') {
-			return (string)$id;
+			return $this->validateInvoiceId((string)$id);
 		}
 
 		return '';
+	}
+
+	private function getInvoice(string $invoice_id): array {
+		$curl = curl_init();
+
+		curl_setopt($curl, CURLOPT_URL, 'https://api.paydo.com/v1/invoices/' . rawurlencode($invoice_id));
+		curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, true);
+		curl_setopt($curl, CURLOPT_SSL_VERIFYHOST, 2);
+		curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+		curl_setopt($curl, CURLOPT_HEADER, false);
+		curl_setopt($curl, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+
+		$response = curl_exec($curl);
+
+		if ($response === false) {
+			$this->log->write('Paydo get invoice cURL error: ' . curl_error($curl));
+			curl_close($curl);
+			return [];
+		}
+
+		$code = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+		curl_close($curl);
+
+		if ($code < 200 || $code >= 300) {
+			$this->log->write('Paydo get invoice HTTP error: ' . $code . '; body: ' . $response);
+			return [];
+		}
+
+		$json = json_decode($response, true);
+
+		if (!is_array($json) || !isset($json['data']) || !is_array($json['data'])) {
+			$this->log->write('Paydo get invoice invalid response: ' . $response);
+			return [];
+		}
+
+		return $json['data'];
+	}
+
+	private function validateInvoiceId(string $invoice_id): string {
+		$invoice_id = trim($invoice_id);
+
+		if (!preg_match('/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i', $invoice_id)) {
+			$this->log->write('Paydo: invalid invoice ID format');
+
+			return '';
+		}
+
+		return $invoice_id;
 	}
 }

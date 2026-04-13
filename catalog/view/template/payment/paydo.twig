@@ -20,11 +20,19 @@ async function paydo() {
     const data = await response.json();
 
     if (data && data.redirect) {
-      window.location.href = data.redirect;
-      return;
+      const redirectUrl = new URL(data.redirect, window.location.origin);
+
+      if (redirectUrl.origin === 'https://checkout.paydo.com') {
+        window.location.href = redirectUrl.toString();
+        return;
+      }
     }
 
-    throw new Error(data && data.error ? data.error : 'Unknown error');
+    if (data && data.error) {
+      throw new Error(data.error);
+    }
+
+    throw new Error('Invalid redirect URL');
   } catch (err) {
     console.error('Paydo error:', err);
     alert('Error occurred while processing payment.');
@@ -33,4 +41,3 @@ async function paydo() {
   }
 }
 </script>
-
