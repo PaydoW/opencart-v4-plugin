@@ -57,7 +57,7 @@ class Paydo extends \Opencart\System\Engine\Controller {
 			if ($invoiceId) {
 				$this->model_extension_paydo_payment_paydo->saveInvoice($order_id, $invoiceId);
 				$this->setPendingOrderStatus($order_info, $invoiceId);
-				$redirectUrl = "https://checkout.paydo.com/{$this->language->get('code')}/payment/invoice-preprocessing/{$invoiceId}";
+				$redirectUrl = 'https://checkout.paydo.com/' . rawurlencode($this->language->get('code')) . '/payment/invoice-preprocessing/' . rawurlencode($invoiceId);
 				$this->response->setOutput(json_encode(['redirect' => $redirectUrl]));
 			} else {
 				$this->log->write('Paydo: invoice creation failed or empty identifier');
@@ -317,6 +317,7 @@ class Paydo extends \Opencart\System\Engine\Controller {
 			$this->curl = curl_init();
 			curl_setopt($this->curl, CURLOPT_URL, 'https://api.paydo.com/v1/invoices/create');
 			curl_setopt($this->curl, CURLOPT_SSL_VERIFYPEER, true);
+			curl_setopt($this->curl, CURLOPT_SSL_VERIFYHOST, 2);
 			curl_setopt($this->curl, CURLOPT_RETURNTRANSFER, true);
 			curl_setopt($this->curl, CURLOPT_HEADER, false);
 		}
@@ -346,7 +347,7 @@ class Paydo extends \Opencart\System\Engine\Controller {
 		$json = json_decode($response, true);
 
 		if (is_array($json) && isset($json['data']) && is_string($json['data']) && $json['data'] !== '') {
-			return $json['data'];
+			return $this->validateInvoiceId($json['data']);
 		}
 
 		$id = $json['data']['invoice']['identifier']
@@ -355,7 +356,7 @@ class Paydo extends \Opencart\System\Engine\Controller {
 			?? '';
 
 		if ($id !== '') {
-			return (string)$id;
+			return $this->validateInvoiceId((string)$id);
 		}
 
 		return '';
@@ -366,6 +367,7 @@ class Paydo extends \Opencart\System\Engine\Controller {
 
 		curl_setopt($curl, CURLOPT_URL, 'https://api.paydo.com/v1/invoices/' . rawurlencode($invoice_id));
 		curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, true);
+		curl_setopt($curl, CURLOPT_SSL_VERIFYHOST, 2);
 		curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
 		curl_setopt($curl, CURLOPT_HEADER, false);
 		curl_setopt($curl, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
@@ -394,5 +396,17 @@ class Paydo extends \Opencart\System\Engine\Controller {
 		}
 
 		return $json['data'];
+	}
+
+	private function validateInvoiceId(string $invoice_id): string {
+		$invoice_id = trim($invoice_id);
+
+		if (!preg_match('/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i', $invoice_id)) {
+			$this->log->write('Paydo: invalid invoice ID format');
+
+			return '';
+		}
+
+		return $invoice_id;
 	}
 }
