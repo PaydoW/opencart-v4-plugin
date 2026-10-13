@@ -22,7 +22,7 @@ jobs:
 
       - name: Build paydo.ocmod.zip
         run: |
-          git archive --format=zip --output=paydo.ocmod.zip ${{ github.sha }}
+          zip -r paydo.ocmod.zip admin catalog install.json README.md CHANGELOG.md LICENSE
           ls -lah
 
       - name: Upload asset to Release

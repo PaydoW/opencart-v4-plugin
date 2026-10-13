@@ -33,8 +33,54 @@ In the settings form, fill in:
 - **Secret Key** — your Paydo project Secret Key.  
 - **IPN URL** — automatically generated link. Copy this link for use in Paydo dashboard.  
 - Configure **Order Status for Pending/Successful/Failed payments**.  
+- To let customers choose a specific PayDo payment method, enable **Separate payment methods** and configure the method list as described below.
 - Set **Sort Order** if needed.  
 - Set **Status → Enabled**.
+
+### Optional: separate PayDo payment methods
+
+This mode follows the PayDo method-selection flow used by the WooCommerce plugin:
+
+1. Enable **Separate payment methods**.
+2. Keep **PayDo Hosted Page** enabled if customers should also be able to choose their payment method on the general PayDo page.
+3. Enter the PayDo **Project ID** and **JWT Token**.
+4. Click **Sync from PayDo**.
+5. Select the methods that should be available to customers.
+6. Save the extension settings.
+
+Every selected method is displayed as a separate option under PayDo during checkout. The selected method identifier is validated against the synchronized allowlist and sent to the PayDo v3 Invoice API in the `paymentMethod` field.
+
+Method logos from PayDo appear beside their names in the standard OpenCart checkout picker. After updating the extension, open its admin settings once to register the checkout display event. Methods without a logo remain available with their name; a failed image download does not affect payment.
+
+- **PayDo Hosted Page** creates an invoice without the `paymentMethod` field.
+- A synchronized direct method creates an invoice with its positive numeric ID as `paymentMethod`.
+- If method selection is disabled, checkout uses the legacy Hosted Page flow without requiring new settings.
+- Project ID and JWT are used only to synchronize methods. JWT is never sent when an invoice is created or read.
+
+At least one checkout option must remain enabled while method selection is active: Hosted Page, a synchronized direct method, or both.
+
+### Updating from an earlier version
+
+1. Back up the existing `extension/paydo` directory and database.
+2. Upload and install the new `paydo.ocmod.zip` through **Extensions → Installer**.
+3. Open the PayDo payment settings once. Version 2.0.0 adds missing settings and upgrades the existing invoice table without resetting Public Key, Secret Key, statuses, or other saved configuration.
+4. Refresh modifications if your store or theme requires it.
+
+Existing stores remain in the standard Hosted Page mode until **Separate payment methods** is explicitly enabled.
+
+The release version is fixed at **2.0.0** throughout development and testing. Do not increment it for intermediate builds.
+
+### Card payments (Internet acquiring)
+
+Synchronize the methods, select the card/acquiring method enabled for your PayDo project, and save. Its numeric identifier is loaded from PayDo rather than hardcoded. Checkout opens the PayDo payment page for that specific method, where the customer enters card details and completes any required 3DS authentication.
+
+The same IPN URL handles both card payments and alternative methods. Transaction identifiers may arrive in `invoice.txid`, `transaction.txid`, `transaction.id`, or `transaction.transactionIdentifier`; they are checked against the invoice returned by API v3.
+
+### Payment confirmation and retries
+
+The customer return URL does not mark an order as paid. PayDo IPN is matched to the locally stored invoice and verified with `GET /v3/invoices/{invoiceId}` before the order status changes. Invoice ID, order ID, amount, currency, and transaction identifiers are checked. Temporary verification errors leave the order pending and use bounded retries; terminal failure states are applied only after successful server-side invoice verification.
+
+Pending invoice verification responds with HTTP 503 and `Retry-After: 60` so PayDo can redeliver the notification. Verified paid/failed notifications respond with HTTP 200. Duplicate notifications do not repeat order history, and late failure notifications cannot undo a verified payment.
 
 ### 5) Refresh modifications
 Go to **Extensions → Modifications** and click **Refresh** to apply changes.
@@ -67,7 +113,7 @@ Go to **Extensions → Modifications** and click **Refresh** to apply changes.
   
 **TIP**: When contacting support it will help us if you provide:
 
-* WordPress and WooCommerce Version
+* OpenCart and PHP versions
 * Other plugins you have installed
   * Some plugins do not play nice
 * Configuration settings for the plugin (Most merchants take screenshots)
@@ -91,4 +137,3 @@ which means if you would like to use this project's code in your own project you
 ## License
 
 Please refer to the [LICENSE](https://github.com/PaydoW/opencart-v4-plugin/blob/master/LICENSE) file that came with this project.
-

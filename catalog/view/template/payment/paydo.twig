@@ -32,10 +32,9 @@ async function paydo() {
       throw new Error(data.error);
     }
 
-    throw new Error('Invalid redirect URL');
+    throw new Error('{{ error_checkout|escape('js') }}');
   } catch (err) {
-    console.error('Paydo error:', err);
-    alert('Error occurred while processing payment.');
+    alert(err && err.message ? err.message : '{{ error_checkout|escape('js') }}');
   } finally {
     button.disabled = false;
   }
