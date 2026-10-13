@@ -65,6 +65,90 @@
                     </div>
 
                     <div class="row mb-3">
+                        <label class="col-sm-2 col-form-label" for="entry-methods-mode">{{ entry_methods_mode }}</label>
+                        <div class="col-sm-10">
+                            <select name="payment_paydo_methods_mode" id="entry-methods-mode" class="form-select">
+                                <option value="1" {% if payment_paydo_methods_mode %}selected{% endif %}>{{ text_enabled }}</option>
+                                <option value="0" {% if not payment_paydo_methods_mode %}selected{% endif %}>{{ text_disabled }}</option>
+                            </select>
+                            <div class="form-text">{{ help_methods_mode }}</div>
+                        </div>
+                    </div>
+
+                    <div id="paydo-method-settings">
+                        <div class="row mb-3">
+                            <label class="col-sm-2 col-form-label" for="entry-hosted-page">{{ entry_hosted_page }}</label>
+                            <div class="col-sm-10">
+                                <select name="payment_paydo_hosted_page_enabled" id="entry-hosted-page" class="form-select">
+                                    <option value="1" {% if payment_paydo_hosted_page_enabled %}selected{% endif %}>{{ text_enabled }}</option>
+                                    <option value="0" {% if not payment_paydo_hosted_page_enabled %}selected{% endif %}>{{ text_disabled }}</option>
+                                </select>
+                                <div class="form-text">{{ help_hosted_page }}</div>
+                            </div>
+                        </div>
+
+                        <div class="row mb-3">
+                            <label class="col-sm-2 col-form-label" for="entry-project-id">{{ entry_project_id }}</label>
+                            <div class="col-sm-10">
+                                <input type="text" name="payment_paydo_project_id"
+                                       value="{{ payment_paydo_project_id }}"
+                                       id="entry-project-id" class="form-control" autocomplete="off"/>
+                                <div class="form-text">{{ help_project_id }}</div>
+                            </div>
+                        </div>
+
+                        <div class="row mb-3">
+                            <label class="col-sm-2 col-form-label" for="entry-jwt-token">{{ entry_jwt_token }}</label>
+                            <div class="col-sm-10">
+                                <textarea name="payment_paydo_jwt_token" id="entry-jwt-token"
+                                          class="form-control" rows="4" autocomplete="off">{{ payment_paydo_jwt_token }}</textarea>
+                                <div class="form-text">{{ help_jwt_token }}</div>
+                            </div>
+                        </div>
+
+                        <div class="row mb-3">
+                            <label class="col-sm-2 col-form-label">{{ entry_sync_methods }}</label>
+                            <div class="col-sm-10">
+                                <button type="button" id="button-sync-methods" class="btn btn-secondary">
+                                    <i class="fa fa-refresh"></i> {{ button_sync_methods }}
+                                </button>
+                                <span id="paydo-sync-status" class="ms-2"></span>
+                                <div class="form-text">{{ help_sync_methods }}</div>
+                            </div>
+                        </div>
+
+                        <div class="row mb-3">
+                            <label class="col-sm-2 col-form-label" for="paydo-method-search">{{ entry_enabled_methods }}</label>
+                            <div class="col-sm-10">
+                                <input type="search" id="paydo-method-search" class="form-control mb-2"
+                                       placeholder="{{ text_search_methods }}"/>
+                                <div id="paydo-methods-list" class="border rounded p-3" style="max-height: 360px; overflow: auto;">
+                                    {% if payment_paydo_available_methods %}
+                                        {% for identifier, method in payment_paydo_available_methods %}
+                                            <label class="paydo-method-row d-flex align-items-center gap-2 mb-2" data-search="{{ method.title|lower }} {{ identifier }}">
+                                                <input type="checkbox" class="form-check-input mt-0"
+                                                       name="payment_paydo_enabled_methods[]"
+                                                       value="{{ identifier }}"
+                                                       {% if identifier in payment_paydo_enabled_methods %}checked{% endif %}/>
+                                                {% if method.logo %}
+                                                    <img src="{{ method.logo }}" alt="" loading="lazy" style="width: auto; height: 24px; max-width: 70px; object-fit: contain;"/>
+                                                {% endif %}
+                                                <span><strong>{{ method.title }}</strong> <small class="text-muted">#{{ identifier }}</small></span>
+                                            </label>
+                                        {% endfor %}
+                                    {% else %}
+                                        <div id="paydo-no-methods" class="text-muted">{{ text_no_methods }}</div>
+                                    {% endif %}
+                                </div>
+                                <div class="form-text">{{ help_enabled_methods }}</div>
+                                {% if error_enabled_methods %}
+                                    <div class="text-danger">{{ error_enabled_methods }}</div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
                         <label class="col-sm-2 col-form-label" for="entry-ipn_url">
                             IPN URL
                         </label>
@@ -158,4 +242,96 @@ function copyToClipboard(elementId) {
     copyText.select();
     document.execCommand("copy");
 }
+
+function togglePaydoMethodSettings() {
+    document.getElementById('paydo-method-settings').style.display =
+        document.getElementById('entry-methods-mode').value === '1' ? '' : 'none';
+}
+
+function filterPaydoMethods() {
+    const query = document.getElementById('paydo-method-search').value.trim().toLowerCase();
+    document.querySelectorAll('.paydo-method-row').forEach(function(row) {
+        row.style.display = !query || (row.dataset.search || '').includes(query) ? '' : 'none';
+    });
+}
+
+function renderPaydoMethods(methods) {
+    const list = document.getElementById('paydo-methods-list');
+    const selected = new Set(Array.from(list.querySelectorAll('input:checked')).map(function(input) {
+        return input.value;
+    }));
+    list.replaceChildren();
+
+    Object.keys(methods).forEach(function(identifier) {
+        const method = methods[identifier];
+        const label = document.createElement('label');
+        label.className = 'paydo-method-row d-flex align-items-center gap-2 mb-2';
+        label.dataset.search = ((method.title || '') + ' ' + identifier).toLowerCase();
+
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.className = 'form-check-input mt-0';
+        checkbox.name = 'payment_paydo_enabled_methods[]';
+        checkbox.value = identifier;
+        checkbox.checked = selected.has(identifier);
+        label.appendChild(checkbox);
+
+        if (method.logo) {
+            const logo = document.createElement('img');
+            logo.src = method.logo;
+            logo.alt = '';
+            logo.loading = 'lazy';
+            logo.style.cssText = 'width:auto;height:24px;max-width:70px;object-fit:contain';
+            label.appendChild(logo);
+        }
+
+        const title = document.createElement('span');
+        const strong = document.createElement('strong');
+        strong.textContent = method.title || ('#' + identifier);
+        title.appendChild(strong);
+        title.appendChild(document.createTextNode(' #' + identifier));
+        label.appendChild(title);
+        list.appendChild(label);
+    });
+}
+
+document.getElementById('entry-methods-mode').addEventListener('change', togglePaydoMethodSettings);
+document.getElementById('paydo-method-search').addEventListener('input', filterPaydoMethods);
+document.getElementById('button-sync-methods').addEventListener('click', async function() {
+    const button = this;
+    const status = document.getElementById('paydo-sync-status');
+    const body = new URLSearchParams({
+        project_id: document.getElementById('entry-project-id').value,
+        jwt_token: document.getElementById('entry-jwt-token').value
+    });
+
+    button.disabled = true;
+    status.className = 'ms-2 text-muted';
+    status.textContent = '{{ text_syncing|escape('js') }}';
+
+    try {
+        const response = await fetch('{{ sync_methods_url|replace({'&amp;': '&'}) }}', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'},
+            body: body.toString()
+        });
+        const json = await response.json();
+
+        if (!response.ok || json.error) {
+            throw new Error(json.error || '{{ error_methods_request|escape('js') }}');
+        }
+
+        renderPaydoMethods(json.methods || {});
+        status.className = 'ms-2 text-success';
+        status.textContent = json.success;
+    } catch (error) {
+        status.className = 'ms-2 text-danger';
+        status.textContent = error.message;
+    } finally {
+        button.disabled = false;
+    }
+});
+
+togglePaydoMethodSettings();
 </script>
